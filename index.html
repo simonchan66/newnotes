@@ -3,58 +3,74 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <!-- Make it behave like a native iOS app -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#000000">
     <title>My Revision</title>
     
-    <!-- Markdown Parser Library -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     
     <style>
-        /* iOS Safari Dark Theme */
+        /* Refined iOS Safari Dark Theme */
         :root {
             --bg: #000000;
             --surface: #1c1c1e;
-            --text: #f2f2f7;
+            --surface-hover: #2c2c2e;
+            --text: #ffffff;
             --subtext: #8e8e93;
             --accent: #0a84ff;
+            --danger: #ff453a;
             --border: #38383a;
         }
         
-        * { box-sizing: border-box; }
+        * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif; }
         
         body {
             background-color: var(--bg);
             color: var(--text);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             margin: 0;
             padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom)) 20px;
             -webkit-font-smoothing: antialiased;
         }
 
-        .screen { display: none; }
+        .screen { display: none; animation: fadeIn 0.3s ease; }
         .active { display: block; }
         
-        h1, h2, h3 { margin-top: 0; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Typography & Headers */
+        .header-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-bottom: 24px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+        }
         
+        h1 { margin: 0; font-size: 34px; font-weight: 700; letter-spacing: -0.5px; }
+        h2 { margin: 0 0 16px 0; font-size: 22px; font-weight: 600; }
+        
+        /* Inputs & Buttons */
         input, textarea {
             width: 100%;
             background: var(--surface);
             color: var(--text);
             border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 14px;
+            border-radius: 12px;
+            padding: 16px;
             margin-bottom: 16px;
-            font-size: 16px; /* 16px prevents auto-zooming on iPhone */
+            font-size: 17px;
             outline: none;
+            transition: border-color 0.2s;
         }
         
-        textarea {
-            min-height: 250px;
-            resize: none;
-        }
+        input:focus, textarea:focus { border-color: var(--accent); }
+        
+        textarea { min-height: 300px; resize: none; line-height: 1.5; }
         
         button {
             width: 100%;
@@ -62,77 +78,135 @@
             color: #fff;
             border: none;
             padding: 16px;
-            border-radius: 10px;
-            font-size: 16px;
+            border-radius: 12px;
+            font-size: 17px;
             font-weight: 600;
             cursor: pointer;
             margin-bottom: 12px;
+            transition: opacity 0.2s;
         }
         
+        button:active { opacity: 0.7; }
+        
+        button.text-btn {
+            width: auto;
+            background: transparent;
+            color: var(--accent);
+            padding: 8px 0;
+            font-size: 17px;
+            font-weight: 500;
+            margin: 0;
+        }
+
         button.secondary {
             background: var(--surface);
             color: var(--accent);
             border: 1px solid var(--border);
         }
 
+        /* Note Cards */
         .note-card {
             background: var(--surface);
-            padding: 16px;
-            border-radius: 12px;
-            margin-bottom: 12px;
+            padding: 18px;
+            border-radius: 16px;
+            margin-bottom: 16px;
+            position: relative;
             cursor: pointer;
+            border: 1px solid transparent;
+            transition: transform 0.1s, background 0.2s;
         }
         
-        .note-card h3 { margin: 0 0 4px 0; font-size: 18px; }
-        .note-card p { margin: 0; color: var(--subtext); font-size: 14px; }
+        .note-card:active { transform: scale(0.98); background: var(--surface-hover); }
+        .note-card h3 { margin: 0 0 6px 0; font-size: 19px; padding-right: 40px; }
+        .note-card p { margin: 0; color: var(--subtext); font-size: 15px; }
+
+        /* Delete Button */
+        .delete-btn {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            background: rgba(255, 69, 58, 0.15);
+            color: var(--danger);
+            border: none;
+            border-radius: 50%;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            padding: 0;
+            margin: 0;
+        }
         
-        /* Rendered Markdown Styling */
+        /* Revision Tailored Markdown Styling */
         #md-content {
             background: var(--surface);
-            padding: 20px;
-            border-radius: 12px;
+            padding: 24px;
+            border-radius: 16px;
             line-height: 1.6;
+            font-size: 17px;
+            letter-spacing: -0.3px;
             overflow-wrap: break-word;
         }
-        #md-content img { max-width: 100%; border-radius: 8px; }
-        #md-content pre { background: var(--bg); padding: 12px; border-radius: 8px; overflow-x: auto; }
-        #md-content code { font-family: ui-monospace, monospace; font-size: 14px; }
-        #md-content a { color: var(--accent); }
+        
+        #md-content h1, #md-content h2, #md-content h3 { margin-top: 1.5em; margin-bottom: 0.5em; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+        #md-content h1:first-child, #md-content h2:first-child { margin-top: 0; }
+        #md-content p { margin-bottom: 1.2em; }
+        #md-content strong { color: #fff; background: rgba(255,255,255,0.1); padding: 2px 4px; border-radius: 4px; }
+        #md-content blockquote {
+            border-left: 4px solid var(--accent);
+            margin: 0 0 1.2em 0;
+            padding: 4px 16px;
+            background: rgba(10, 132, 255, 0.05);
+            border-radius: 0 8px 8px 0;
+            color: #d1d1d6;
+            font-style: italic;
+        }
+        #md-content ul, #md-content ol { padding-left: 20px; margin-bottom: 1.2em; }
+        #md-content li { margin-bottom: 6px; }
+        #md-content img { max-width: 100%; border-radius: 8px; margin: 12px 0; }
+        #md-content pre { background: var(--bg); padding: 16px; border-radius: 12px; overflow-x: auto; border: 1px solid var(--border); }
+        #md-content code { font-family: ui-monospace, Menlo, monospace; font-size: 15px; background: var(--bg); padding: 2px 6px; border-radius: 6px; }
+        #md-content a { color: var(--accent); text-decoration: none; }
     </style>
 </head>
 <body>
 
-    <!-- Setup Screen (Only seen on first load) -->
+    <!-- Setup Screen -->
     <div id="setup-screen" class="screen active">
-        <h2>App Setup</h2>
-        <p style="color: var(--subtext); font-size: 14px;">Data is stored securely. Enter your private repo info.</p>
+        <h1>Setup</h1>
+        <p style="color: var(--subtext); margin-bottom: 24px;">Connect your secure GitHub repository.</p>
         <input type="password" id="gh-token" placeholder="GitHub Personal Access Token">
-        <input type="text" id="gh-repo" placeholder="github-username/revision-notes">
-        <button onclick="saveSetup()">Connect</button>
+        <input type="text" id="gh-repo" placeholder="username/revision-notes">
+        <button onclick="saveSetup()">Connect & Load</button>
     </div>
 
     <!-- Notes List Screen -->
     <div id="list-screen" class="screen">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h2>My Revision</h2>
-            <button onclick="nav('add-screen')" style="width: auto; margin: 0; padding: 10px 16px;">+ Add Note</button>
+        <div class="header-bar">
+            <h1>Revisions</h1>
+            <button class="text-btn" onclick="nav('add-screen')">＋ Add</button>
         </div>
-        <div id="notes-list">Loading...</div>
+        <div id="notes-list"></div>
     </div>
 
     <!-- Add Note Screen -->
     <div id="add-screen" class="screen">
-        <h2>New Note</h2>
-        <input type="text" id="note-title" placeholder="Topic Title">
-        <textarea id="note-body" placeholder="Write your notes in Markdown here..."></textarea>
-        <button onclick="saveNote()">Save Note</button>
-        <button class="secondary" onclick="nav('list-screen')">Cancel</button>
+        <div class="header-bar" style="margin-bottom: 16px; border:none; padding:0;">
+            <button class="text-btn" onclick="nav('list-screen')">Cancel</button>
+            <button class="text-btn" id="save-btn" onclick="saveNote()" style="font-weight: 600;">Save</button>
+        </div>
+        <input type="text" id="note-title" placeholder="Topic / Module Title">
+        <textarea id="note-body" placeholder="Write your revision notes here in Markdown..."></textarea>
     </div>
 
     <!-- Read Note Screen -->
     <div id="read-screen" class="screen">
-        <button class="secondary" onclick="nav('list-screen')" style="width: auto; padding: 10px 16px;">← Back</button>
-        <h2 id="read-title" style="margin-top: 16px;"></h2>
+        <div class="header-bar" style="margin-bottom: 16px; border:none; padding:0;">
+            <button class="text-btn" onclick="nav('list-screen')">← Back</button>
+        </div>
+        <h2 id="read-title"></h2>
         <div id="md-content"></div>
     </div>
 
@@ -141,7 +215,6 @@
         let notesData = [];
         let fileSha = null;
 
-        // UTF-8 friendly Base64 Encoders required by GitHub API
         const encodeBase64 = str => btoa(unescape(encodeURIComponent(str)));
         const decodeBase64 = str => decodeURIComponent(escape(atob(str)));
 
@@ -173,7 +246,7 @@
 
         async function fetchNotes() {
             nav('list-screen');
-            document.getElementById('notes-list').innerHTML = "<p style='color: var(--subtext)'>Fetching notes securely...</p>";
+            document.getElementById('notes-list').innerHTML = "<p style='color: var(--subtext); text-align: center; margin-top: 40px;'>Loading notes securely...</p>";
             
             const token = localStorage.getItem('gh_token');
             const repo = localStorage.getItem('gh_repo');
@@ -187,7 +260,7 @@
                     }
                 });
 
-                if (res.status === 404) { // File doesn't exist yet
+                if (res.status === 404) {
                     notesData = [];
                     fileSha = null;
                     renderList();
@@ -197,10 +270,10 @@
                     notesData = JSON.parse(decodeBase64(data.content));
                     renderList();
                 } else {
-                    throw new Error("Invalid credentials or repository name.");
+                    throw new Error("Invalid credentials.");
                 }
             } catch (err) {
-                alert(err.message);
+                alert("Connection failed. Please check your token and repo name.");
                 nav('setup-screen');
             }
         }
@@ -210,7 +283,7 @@
             listEl.innerHTML = '';
             
             if (notesData.length === 0) {
-                listEl.innerHTML = "<p style='color: var(--subtext)'>No notes yet. Create your first revision note!</p>";
+                listEl.innerHTML = "<p style='color: var(--subtext); text-align: center; margin-top: 40px;'>No notes yet. Tap + to start revising.</p>";
                 return;
             }
 
@@ -225,8 +298,17 @@
                 const date = document.createElement('p');
                 date.textContent = note.date;
 
+                const delBtn = document.createElement('button');
+                delBtn.className = 'delete-btn';
+                delBtn.innerHTML = '×';
+                delBtn.onclick = (e) => {
+                    e.stopPropagation(); // Prevents opening the note when clicking delete
+                    deleteNote(note.id);
+                };
+
                 card.appendChild(title);
                 card.appendChild(date);
+                card.appendChild(delBtn);
                 listEl.appendChild(card);
             });
         }
@@ -236,19 +318,46 @@
             if (!note) return;
             
             document.getElementById('read-title').textContent = note.title;
-            // Render the Markdown content
             document.getElementById('md-content').innerHTML = marked.parse(note.content);
             nav('read-screen');
+        }
+
+        // Helper function to handle saving/deleting via GitHub API
+        async function syncToGitHub(updatedData, commitMessage) {
+            const token = localStorage.getItem('gh_token');
+            const repo = localStorage.getItem('gh_repo');
+
+            const res = await fetch(`${API_BASE}/${repo}/contents/notes.json`, {
+                method: 'PUT',
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "Accept": "application/vnd.github+json",
+                    "Content-Type": "application/json",
+                    "X-GitHub-Api-Version": "2022-11-28"
+                },
+                body: JSON.stringify({
+                    message: commitMessage,
+                    content: encodeBase64(JSON.stringify(updatedData, null, 2)),
+                    sha: fileSha || undefined
+                })
+            });
+
+            if (!res.ok) throw new Error("Failed to sync with GitHub");
+
+            const data = await res.json();
+            fileSha = data.content.sha;
+            notesData = updatedData;
         }
 
         async function saveNote() {
             const titleEl = document.getElementById('note-title');
             const bodyEl = document.getElementById('note-body');
-            const btn = document.querySelector('#add-screen button');
+            const btn = document.getElementById('save-btn');
             
-            if (!titleEl.value || !bodyEl.value) return alert("Please enter both a title and content.");
+            if (!titleEl.value || !bodyEl.value) return alert("Please enter a title and content.");
 
-            btn.textContent = "Saving to GitHub...";
+            btn.textContent = "Saving...";
+            btn.style.opacity = "0.5";
             btn.disabled = true;
 
             const newNote = {
@@ -258,45 +367,42 @@
                 date: new Date().toLocaleDateString()
             };
 
-            const updatedNotes = [newNote, ...notesData]; // Put newest note at the top
-            const token = localStorage.getItem('gh_token');
-            const repo = localStorage.getItem('gh_repo');
+            const updatedNotes = [newNote, ...notesData];
 
             try {
-                const res = await fetch(`${API_BASE}/${repo}/contents/notes.json`, {
-                    method: 'PUT',
-                    headers: {
-                        "Authorization": `Bearer ${token}`,
-                        "Accept": "application/vnd.github+json",
-                        "Content-Type": "application/json",
-                        "X-GitHub-Api-Version": "2022-11-28"
-                    },
-                    body: JSON.stringify({
-                        message: `Add revision note: ${newNote.title}`,
-                        content: encodeBase64(JSON.stringify(updatedNotes, null, 2)),
-                        sha: fileSha || undefined // Required by GitHub if the file already exists
-                    })
-                });
-
-                if (!res.ok) throw new Error("Failed to save to GitHub");
-
-                const data = await res.json();
-                fileSha = data.content.sha;
-                notesData = updatedNotes;
-                
+                await syncToGitHub(updatedNotes, `Add note: ${newNote.title}`);
                 titleEl.value = "";
                 bodyEl.value = "";
                 renderList();
                 nav('list-screen');
             } catch (err) {
-                alert("Error: " + err.message);
+                alert(err.message);
             } finally {
-                btn.textContent = "Save Note";
+                btn.textContent = "Save";
+                btn.style.opacity = "1";
                 btn.disabled = false;
             }
         }
 
-        // Boot up the application
+        async function deleteNote(id) {
+            if (!confirm("Are you sure you want to delete this note?")) return;
+
+            // Optional: Provide UI feedback while deleting
+            document.getElementById('notes-list').style.opacity = "0.5";
+
+            const noteToDelete = notesData.find(n => n.id === id);
+            const updatedNotes = notesData.filter(n => n.id !== id);
+
+            try {
+                await syncToGitHub(updatedNotes, `Delete note: ${noteToDelete.title}`);
+                renderList();
+            } catch (err) {
+                alert(err.message);
+            } finally {
+                document.getElementById('notes-list').style.opacity = "1";
+            }
+        }
+
         init();
     </script>
 </body>
