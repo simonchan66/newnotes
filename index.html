@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- Make it behave like a native iOS app -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#000000">
+    <title>My Revision</title>
+    
+    <!-- Markdown Parser Library -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    
+    <style>
+        /* iOS Safari Dark Theme */
+        :root {
+            --bg: #000000;
+            --surface: #1c1c1e;
+            --text: #f2f2f7;
+            --subtext: #8e8e93;
+            --accent: #0a84ff;
+            --border: #38383a;
+        }
+        
+        * { box-sizing: border-box; }
+        
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom)) 20px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .screen { display: none; }
+        .active { display: block; }
+        
+        h1, h2, h3 { margin-top: 0; }
+        
+        input, textarea {
+            width: 100%;
+            background: var(--surface);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px;
+            margin-bottom: 16px;
+            font-size: 16px; /* 16px prevents auto-zooming on iPhone */
+            outline: none;
+        }
+        
+        textarea {
+            min-height: 250px;
+            resize: none;
+        }
+        
+        button {
+            width: 100%;
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            padding: 16px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-bottom: 12px;
+        }
+        
+        button.secondary {
+            background: var(--surface);
+            color: var(--accent);
+            border: 1px solid var(--border);
+        }
+
+        .note-card {
+            background: var(--surface);
+            padding: 16px;
+            border-radius: 12px;
+            margin-bottom: 12px;
+            cursor: pointer;
+        }
+        
+        .note-card h3 { margin: 0 0 4px 0; font-size: 18px; }
+        .note-card p { margin: 0; color: var(--subtext); font-size: 14px; }
+        
+        /* Rendered Markdown Styling */
+        #md-content {
+            background: var(--surface);
+            padding: 20px;
+            border-radius: 12px;
+            line-height: 1.6;
+            overflow-wrap: break-word;
+        }
+        #md-content img { max-width: 100%; border-radius: 8px; }
+        #md-content pre { background: var(--bg); padding: 12px; border-radius: 8px; overflow-x: auto; }
+        #md-content code { font-family: ui-monospace, monospace; font-size: 14px; }
+        #md-content a { color: var(--accent); }
+    </style>
+</head>
+<body>
+
+    <!-- Setup Screen (Only seen on first load) -->
+    <div id="setup-screen" class="screen active">
+        <h2>App Setup</h2>
+        <p style="color: var(--subtext); font-size: 14px;">Data is stored securely. Enter your private repo info.</p>
+        <input type="password" id="gh-token" placeholder="GitHub Personal Access Token">
+        <input type="text" id="gh-repo" placeholder="github-username/revision-notes">
+        <button onclick="saveSetup()">Connect</button>
+    </div>
+
+    <!-- Notes List Screen -->
+    <div id="list-screen" class="screen">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h2>My Revision</h2>
+            <button onclick="nav('add-screen')" style="width: auto; margin: 0; padding: 10px 16px;">+ Add Note</button>
+        </div>
+        <div id="notes-list">Loading...</div>
+    </div>
+
+    <!-- Add Note Screen -->
+    <div id="add-screen" class="screen">
+        <h2>New Note</h2>
+        <input type="text" id="note-title" placeholder="Topic Title">
+        <textarea id="note-body" placeholder="Write your notes in Markdown here..."></textarea>
+        <button onclick="saveNote()">Save Note</button>
+        <button class="secondary" onclick="nav('list-screen')">Cancel</button>
+    </div>
+
+    <!-- Read Note Screen -->
+    <div id="read-screen" class="screen">
+        <button class="secondary" onclick="nav('list-screen')" style="width: auto; padding: 10px 16px;">← Back</button>
+        <h2 id="read-title" style="margin-top: 16px;"></h2>
+        <div id="md-content"></div>
+    </div>
+
+    <script>
+        const API_BASE = "https://api.github.com/repos";
+        let notesData = [];
+        let fileSha = null;
+
+        // UTF-8 friendly Base64 Encoders required by GitHub API
+        const encodeBase64 = str => btoa(unescape(encodeURIComponent(str)));
+        const decodeBase64 = str => decodeURIComponent(escape(atob(str)));
+
+        function nav(screenId) {
+            document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
+            document.getElementById(screenId).classList.add('active');
+            window.scrollTo(0, 0);
+        }
+
+        function init() {
+            const token = localStorage.getItem('gh_token');
+            const repo = localStorage.getItem('gh_repo');
+            if (token && repo) {
+                document.getElementById('gh-token').value = token;
+                document.getElementById('gh-repo').value = repo;
+                fetchNotes();
+            }
+        }
+
+        function saveSetup() {
+            const token = document.getElementById('gh-token').value.trim();
+            const repo = document.getElementById('gh-repo').value.trim();
+            if (!token || !repo) return alert('Please fill both fields');
+            
+            localStorage.setItem('gh_token', token);
+            localStorage.setItem('gh_repo', repo);
+            fetchNotes();
+        }
+
+        async function fetchNotes() {
+            nav('list-screen');
+            document.getElementById('notes-list').innerHTML = "<p style='color: var(--subtext)'>Fetching notes securely...</p>";
+            
+            const token = localStorage.getItem('gh_token');
+            const repo = localStorage.getItem('gh_repo');
+
+            try {
+                const res = await fetch(`${API_BASE}/${repo}/contents/notes.json`, {
+                    headers: {
+                        "Authorization": `Bearer ${token}`,
+                        "Accept": "application/vnd.github+json",
+                        "X-GitHub-Api-Version": "2022-11-28"
+                    }
+                });
+
+                if (res.status === 404) { // File doesn't exist yet
+                    notesData = [];
+                    fileSha = null;
+                    renderList();
+                } else if (res.ok) {
+                    const data = await res.json();
+                    fileSha = data.sha;
+                    notesData = JSON.parse(decodeBase64(data.content));
+                    renderList();
+                } else {
+                    throw new Error("Invalid credentials or repository name.");
+                }
+            } catch (err) {
+                alert(err.message);
+                nav('setup-screen');
+            }
+        }
+
+        function renderList() {
+            const listEl = document.getElementById('notes-list');
+            listEl.innerHTML = '';
+            
+            if (notesData.length === 0) {
+                listEl.innerHTML = "<p style='color: var(--subtext)'>No notes yet. Create your first revision note!</p>";
+                return;
+            }
+
+            notesData.forEach(note => {
+                const card = document.createElement('div');
+                card.className = 'note-card';
+                card.onclick = () => openNote(note.id);
+                
+                const title = document.createElement('h3');
+                title.textContent = note.title;
+                
+                const date = document.createElement('p');
+                date.textContent = note.date;
+
+                card.appendChild(title);
+                card.appendChild(date);
+                listEl.appendChild(card);
+            });
+        }
+
+        function openNote(id) {
+            const note = notesData.find(n => n.id === id);
+            if (!note) return;
+            
+            document.getElementById('read-title').textContent = note.title;
+            // Render the Markdown content
+            document.getElementById('md-content').innerHTML = marked.parse(note.content);
+            nav('read-screen');
+        }
+
+        async function saveNote() {
+            const titleEl = document.getElementById('note-title');
+            const bodyEl = document.getElementById('note-body');
+            const btn = document.querySelector('#add-screen button');
+            
+            if (!titleEl.value || !bodyEl.value) return alert("Please enter both a title and content.");
+
+            btn.textContent = "Saving to GitHub...";
+            btn.disabled = true;
+
+            const newNote = {
+                id: Date.now().toString(),
+                title: titleEl.value,
+                content: bodyEl.value,
+                date: new Date().toLocaleDateString()
+            };
+
+            const updatedNotes = [newNote, ...notesData]; // Put newest note at the top
+            const token = localStorage.getItem('gh_token');
+            const repo = localStorage.getItem('gh_repo');
+
+            try {
+                const res = await fetch(`${API_BASE}/${repo}/contents/notes.json`, {
+                    method: 'PUT',
+                    headers: {
+                        "Authorization": `Bearer ${token}`,
+                        "Accept": "application/vnd.github+json",
+                        "Content-Type": "application/json",
+                        "X-GitHub-Api-Version": "2022-11-28"
+                    },
+                    body: JSON.stringify({
+                        message: `Add revision note: ${newNote.title}`,
+                        content: encodeBase64(JSON.stringify(updatedNotes, null, 2)),
+                        sha: fileSha || undefined // Required by GitHub if the file already exists
+                    })
+                });
+
+                if (!res.ok) throw new Error("Failed to save to GitHub");
+
+                const data = await res.json();
+                fileSha = data.content.sha;
+                notesData = updatedNotes;
+                
+                titleEl.value = "";
+                bodyEl.value = "";
+                renderList();
+                nav('list-screen');
+            } catch (err) {
+                alert("Error: " + err.message);
+            } finally {
+                btn.textContent = "Save Note";
+                btn.disabled = false;
+            }
+        }
+
+        // Boot up the application
+        init();
+    </script>
+</body>
+</html>
