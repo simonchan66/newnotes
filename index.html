@@ -111,11 +111,18 @@
             margin: 0;
         }
 
-        /* Floating Back Button for Reading Mode */
-        .floating-back-btn {
+        /* Floating Controls Container for Reading Mode */
+        .floating-controls {
             position: fixed;
             top: max(16px, env(safe-area-inset-top));
             right: 16px;
+            display: flex;
+            gap: 8px;
+            z-index: 9999;
+        }
+
+        /* Individual Floating Buttons */
+        .floating-btn {
             width: auto;
             background: rgba(28, 28, 30, 0.7);
             backdrop-filter: blur(12px);
@@ -126,9 +133,9 @@
             border-radius: 20px;
             font-size: 16px;
             font-weight: 500;
-            z-index: 9999;
             box-shadow: 0 4px 15px rgba(0,0,0,0.5);
             margin: 0;
+            transition: background 0.2s;
         }
 
         /* Note Cards */
@@ -167,7 +174,7 @@
         
         /* Revision Tailored Markdown Styling */
         #read-title {
-            padding-right: 80px; /* Leaves space so the floating button doesn't cover text */
+            padding-right: 160px; /* Space for both floating buttons */
             margin-top: 10px;
         }
         #md-content {
@@ -228,8 +235,11 @@
 
     <!-- Read Note Screen -->
     <div id="read-screen" class="screen">
-        <!-- Floating Back Button -->
-        <button class="floating-back-btn" onclick="nav('list-screen')">← Back</button>
+        <!-- Floating Controls (Back & Copy) -->
+        <div class="floating-controls">
+            <button class="floating-btn" onclick="nav('list-screen')">← Back</button>
+            <button class="floating-btn" id="copy-btn" onclick="copyCurrentNote()">Copy</button>
+        </div>
         
         <h2 id="read-title"></h2>
         <div id="md-content"></div>
@@ -239,6 +249,7 @@
         const API_BASE = "https://api.github.com/repos";
         let notesData = [];
         let fileSha = null;
+        let currentNoteMarkdown = ""; // Stores the raw markdown for copying
 
         const encodeBase64 = str => btoa(unescape(encodeURIComponent(str)));
         const decodeBase64 = str => decodeURIComponent(escape(atob(str)));
@@ -303,7 +314,6 @@
             }
         }
 
-        // Filters notes dynamically based on the search bar
         function filterNotes() {
             const query = document.getElementById('search-input').value.toLowerCase();
             const filtered = notesData.filter(note => 
@@ -313,7 +323,6 @@
             renderList(filtered);
         }
 
-        // Renders either all notes or the searched notes
         function renderList(notesToRender = notesData) {
             const listEl = document.getElementById('notes-list');
             listEl.innerHTML = '';
@@ -357,9 +366,31 @@
             const note = notesData.find(n => n.id === id);
             if (!note) return;
             
+            // Store raw content for copying and reset the button text
+            currentNoteMarkdown = note.content;
+            document.getElementById('copy-btn').textContent = "Copy";
+
             document.getElementById('read-title').textContent = note.title;
             document.getElementById('md-content').innerHTML = marked.parse(note.content);
             nav('read-screen');
+        }
+
+        // New function to handle copying to clipboard
+        async function copyCurrentNote() {
+            try {
+                await navigator.clipboard.writeText(currentNoteMarkdown);
+                const copyBtn = document.getElementById('copy-btn');
+                copyBtn.textContent = "Copied!";
+                
+                // Revert button text back after 2 seconds
+                setTimeout(() => {
+                    if(copyBtn.textContent === "Copied!") {
+                        copyBtn.textContent = "Copy";
+                    }
+                }, 2000);
+            } catch (err) {
+                alert("Failed to copy text.");
+            }
         }
 
         async function syncToGitHub(updatedData, commitMessage) {
@@ -412,7 +443,7 @@
                 await syncToGitHub(updatedNotes, `Add note: ${newNote.title}`);
                 titleEl.value = "";
                 bodyEl.value = "";
-                document.getElementById('search-input').value = ""; // Clear search bar on new note
+                document.getElementById('search-input').value = ""; 
                 renderList();
                 nav('list-screen');
             } catch (err) {
@@ -434,7 +465,7 @@
 
             try {
                 await syncToGitHub(updatedNotes, `Delete note: ${noteToDelete.title}`);
-                filterNotes(); // Re-apply the search filter after deleting
+                filterNotes(); 
             } catch (err) {
                 alert(err.message);
             } finally {
