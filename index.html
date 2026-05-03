@@ -171,6 +171,15 @@
             padding: 0;
             margin: 0;
         }
+
+        /* Storage status footer */
+        #storage-status {
+            text-align: center;
+            color: var(--subtext);
+            font-size: 13px;
+            margin-top: 24px;
+            padding-bottom: 8px;
+        }
         
         /* Revision Tailored Markdown Styling */
         #read-title {
@@ -221,6 +230,7 @@
         <input type="search" id="search-input" class="search-bar" placeholder="Search notes..." oninput="filterNotes()">
         
         <div id="notes-list"></div>
+        <div id="storage-status"></div>
     </div>
 
     <!-- Add Note Screen -->
@@ -247,13 +257,56 @@
 
     <script>
         const API_BASE = "https://api.github.com/repos";
+        const NOTES_FILE = "notes.json";
+
         let notesData = [];
         let fileSha = null;
-        let currentNoteMarkdown = ""; // Stores the raw markdown for copying
+        let currentNoteMarkdown = "";   // Raw markdown for copying
+        let searchDebounce = null;       // Debounce handle for search input
+        let lastSyncedSize = 0;          // Bytes — used by status indicator
 
-        const encodeBase64 = str => btoa(unescape(encodeURIComponent(str)));
-        const decodeBase64 = str => decodeURIComponent(escape(atob(str)));
+        // --- Auth header helper ---
+        function authHeaders(token) {
+            return {
+                "Authorization": `Bearer ${token}`,
+                "X-GitHub-Api-Version": "2022-11-28"
+            };
+        }
 
+        /*
+         * Async base64 helpers.
+         *
+         * The previous app used btoa(unescape(encodeURIComponent(...))) and the
+         * inverse — that breaks down on multi-megabyte strings (slow, deprecated,
+         * and prone to call-stack issues). These versions use Blob + FileReader
+         * for encoding and a data: URL for decoding, which:
+         *   - Stay UTF-8 safe (Blob defaults to UTF-8 when given a string).
+         *   - Run off the synchronous path so the UI doesn't freeze.
+         *   - Handle arbitrarily large strings.
+         */
+        function encodeBase64(str) {
+            return new Promise((resolve, reject) => {
+                const blob = new Blob([str], { type: 'application/octet-stream' });
+                const reader = new FileReader();
+                reader.onload = () => {
+                    // result looks like "data:...;base64,XXXX"
+                    const result = reader.result;
+                    resolve(result.slice(result.indexOf(',') + 1));
+                };
+                reader.onerror = () => reject(new Error("Base64 encode failed"));
+                reader.readAsDataURL(blob);
+            });
+        }
+
+        async function decodeBase64(b64) {
+            // GitHub wraps base64 at 60 chars with newlines — strip whitespace.
+            const clean = b64.replace(/\s/g, '');
+            const res = await fetch(`data:application/octet-stream;base64,${clean}`);
+            const blob = await res.blob();
+            return await blob.text(); // UTF-8 decode
+        }
+
+        // --- Navigation ---
         function nav(screenId) {
             document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
             document.getElementById(screenId).classList.add('active');
@@ -280,53 +333,117 @@
             fetchNotes();
         }
 
+        /*
+         * fetchNotes — handles BOTH small and large files.
+         *
+         * GitHub's Contents API only inlines content for files <= 1 MB. Above
+         * that, the same JSON response comes back with `content: ""` and
+         * `encoding: "none"`. To support up to 100 MB we make a second request
+         * to the same endpoint with `Accept: application/vnd.github.raw`,
+         * which streams the file body directly. We still need the metadata
+         * call first because the SHA it returns is required for the next PUT.
+         */
         async function fetchNotes() {
             nav('list-screen');
-            document.getElementById('notes-list').innerHTML = "<p style='color: var(--subtext); text-align: center; margin-top: 40px;'>Loading notes securely...</p>";
+            const listEl = document.getElementById('notes-list');
+            listEl.innerHTML = "<p style='color: var(--subtext); text-align: center; margin-top: 40px;'>Loading notes securely...</p>";
+            document.getElementById('storage-status').textContent = "";
             
             const token = localStorage.getItem('gh_token');
             const repo = localStorage.getItem('gh_repo');
 
             try {
-                const res = await fetch(`${API_BASE}/${repo}/contents/notes.json`, {
-                    headers: {
-                        "Authorization": `Bearer ${token}`,
-                        "Accept": "application/vnd.github+json",
-                        "X-GitHub-Api-Version": "2022-11-28"
-                    }
+                // Step 1: metadata (gives us the SHA, plus content if <= 1MB)
+                const res = await fetch(`${API_BASE}/${repo}/contents/${NOTES_FILE}`, {
+                    headers: { ...authHeaders(token), "Accept": "application/vnd.github+json" }
                 });
 
                 if (res.status === 404) {
                     notesData = [];
                     fileSha = null;
+                    lastSyncedSize = 0;
                     renderList();
-                } else if (res.ok) {
-                    const data = await res.json();
-                    fileSha = data.sha;
-                    notesData = JSON.parse(decodeBase64(data.content));
-                    renderList();
-                } else {
-                    throw new Error("Invalid credentials.");
+                    return;
                 }
+                if (!res.ok) {
+                    throw new Error(`Auth failed (${res.status}). Check your token & repo name.`);
+                }
+
+                const meta = await res.json();
+                fileSha = meta.sha;
+                lastSyncedSize = meta.size || 0;
+
+                let jsonText;
+                if (meta.encoding === 'base64' && meta.content) {
+                    // Small file path — content is inlined
+                    jsonText = await decodeBase64(meta.content);
+                } else {
+                    // Large file path (> 1 MB) — refetch raw. Same endpoint,
+                    // different Accept header, supports up to 100 MB.
+                    const rawRes = await fetch(`${API_BASE}/${repo}/contents/${NOTES_FILE}`, {
+                        headers: { ...authHeaders(token), "Accept": "application/vnd.github.raw" }
+                    });
+
+                    if (rawRes.ok) {
+                        jsonText = await rawRes.text();
+                    } else {
+                        // Fallback for very old GH Enterprise instances:
+                        // use the Git Data API (blobs by SHA, also up to 100 MB).
+                        const blobRes = await fetch(`${API_BASE}/${repo}/git/blobs/${meta.sha}`, {
+                            headers: { ...authHeaders(token), "Accept": "application/vnd.github.raw" }
+                        });
+                        if (!blobRes.ok) {
+                            throw new Error(`Could not load large notes file (${rawRes.status}).`);
+                        }
+                        jsonText = await blobRes.text();
+                    }
+                }
+
+                notesData = JSON.parse(jsonText);
+                renderList();
             } catch (err) {
-                alert("Connection failed. Please check your token and repo name.");
+                alert("Connection failed: " + err.message);
                 nav('setup-screen');
             }
         }
 
+        // Debounced search — avoids re-scanning a multi-MB dataset on every keystroke
         function filterNotes() {
-            const query = document.getElementById('search-input').value.toLowerCase();
-            const filtered = notesData.filter(note => 
-                note.title.toLowerCase().includes(query) || 
-                note.content.toLowerCase().includes(query)
-            );
-            renderList(filtered);
+            clearTimeout(searchDebounce);
+            searchDebounce = setTimeout(() => {
+                const query = document.getElementById('search-input').value.toLowerCase().trim();
+                if (!query) {
+                    renderList();
+                    return;
+                }
+                const filtered = notesData.filter(note =>
+                    (note.title && note.title.toLowerCase().includes(query)) ||
+                    (note.content && note.content.toLowerCase().includes(query))
+                );
+                renderList(filtered);
+            }, 180);
+        }
+
+        function formatSize(bytes) {
+            if (!bytes) return '0 B';
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / 1024 / 1024).toFixed(2) + ' MB';
         }
 
         function renderList(notesToRender = notesData) {
             const listEl = document.getElementById('notes-list');
             listEl.innerHTML = '';
-            
+
+            // Update status footer
+            const statusEl = document.getElementById('storage-status');
+            if (notesData.length > 0) {
+                const noteWord = notesData.length === 1 ? 'note' : 'notes';
+                statusEl.textContent = `${notesData.length} ${noteWord} · ${formatSize(lastSyncedSize)} synced`;
+            } else {
+                statusEl.textContent = '';
+            }
+
             if (notesToRender.length === 0) {
                 if (notesData.length === 0) {
                     listEl.innerHTML = "<p style='color: var(--subtext); text-align: center; margin-top: 40px;'>No notes yet. Tap + to start revising.</p>";
@@ -336,6 +453,8 @@
                 return;
             }
 
+            // Build off-DOM, then attach once — avoids reflow per card
+            const frag = document.createDocumentFragment();
             notesToRender.forEach(note => {
                 const card = document.createElement('div');
                 card.className = 'note-card';
@@ -358,33 +477,40 @@
                 card.appendChild(title);
                 card.appendChild(date);
                 card.appendChild(delBtn);
-                listEl.appendChild(card);
+                frag.appendChild(card);
             });
+            listEl.appendChild(frag);
         }
 
         function openNote(id) {
             const note = notesData.find(n => n.id === id);
             if (!note) return;
             
-            // Store raw content for copying and reset the button text
             currentNoteMarkdown = note.content;
             document.getElementById('copy-btn').textContent = "Copy";
-
             document.getElementById('read-title').textContent = note.title;
-            document.getElementById('md-content').innerHTML = marked.parse(note.content);
+
+            // For huge notes, marked.parse can take a moment. Show a placeholder
+            // and yield to the paint queue so the navigation feels instant.
+            const mdEl = document.getElementById('md-content');
+            mdEl.innerHTML = "<p style='color: var(--subtext);'>Rendering…</p>";
             nav('read-screen');
+            setTimeout(() => {
+                try {
+                    mdEl.innerHTML = marked.parse(note.content || "");
+                } catch (e) {
+                    mdEl.textContent = note.content || "";
+                }
+            }, 10);
         }
 
-        // New function to handle copying to clipboard
         async function copyCurrentNote() {
             try {
                 await navigator.clipboard.writeText(currentNoteMarkdown);
                 const copyBtn = document.getElementById('copy-btn');
                 copyBtn.textContent = "Copied!";
-                
-                // Revert button text back after 2 seconds
                 setTimeout(() => {
-                    if(copyBtn.textContent === "Copied!") {
+                    if (copyBtn.textContent === "Copied!") {
                         copyBtn.textContent = "Copy";
                     }
                 }, 2000);
@@ -397,25 +523,32 @@
             const token = localStorage.getItem('gh_token');
             const repo = localStorage.getItem('gh_repo');
 
-            const res = await fetch(`${API_BASE}/${repo}/contents/notes.json`, {
+            const jsonString = JSON.stringify(updatedData, null, 2);
+            const encodedContent = await encodeBase64(jsonString);
+
+            const res = await fetch(`${API_BASE}/${repo}/contents/${NOTES_FILE}`, {
                 method: 'PUT',
                 headers: {
-                    "Authorization": `Bearer ${token}`,
+                    ...authHeaders(token),
                     "Accept": "application/vnd.github+json",
-                    "Content-Type": "application/json",
-                    "X-GitHub-Api-Version": "2022-11-28"
+                    "Content-Type": "application/json"
                 },
                 body: JSON.stringify({
                     message: commitMessage,
-                    content: encodeBase64(JSON.stringify(updatedData, null, 2)),
+                    content: encodedContent,
                     sha: fileSha || undefined
                 })
             });
 
-            if (!res.ok) throw new Error("Failed to sync with GitHub");
+            if (!res.ok) {
+                let detail = "";
+                try { detail = (await res.json()).message || ""; } catch (_) {}
+                throw new Error(`Sync failed (${res.status}). ${detail}`);
+            }
 
             const data = await res.json();
             fileSha = data.content.sha;
+            lastSyncedSize = data.content.size || jsonString.length;
             notesData = updatedData;
         }
 
