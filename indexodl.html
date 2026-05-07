@@ -121,17 +121,6 @@
             z-index: 9999;
         }
 
-        /* Bottom Floating Nav (Prev / Next) */
-        .bottom-nav-controls {
-            position: fixed;
-            bottom: max(16px, env(safe-area-inset-bottom));
-            left: 50%;
-            transform: translateX(-50%);
-            display: flex;
-            gap: 8px;
-            z-index: 9999;
-        }
-
         /* Individual Floating Buttons */
         .floating-btn {
             width: auto;
@@ -146,17 +135,8 @@
             font-weight: 500;
             box-shadow: 0 4px 15px rgba(0,0,0,0.5);
             margin: 0;
-            transition: background 0.2s, opacity 0.2s;
+            transition: background 0.2s;
         }
-
-        .floating-btn:disabled {
-            color: var(--subtext);
-            opacity: 0.4;
-            cursor: not-allowed;
-        }
-
-        /* Extra bottom padding on read screen so floating nav doesn't overlap text */
-        #read-screen { padding-bottom: 70px; }
 
         /* Note Cards */
         .note-card {
@@ -273,23 +253,15 @@
         
         <h2 id="read-title"></h2>
         <div id="md-content"></div>
-
-        <!-- Bottom Floating Nav for Prev / Next case -->
-        <div class="bottom-nav-controls">
-            <button class="floating-btn" id="prev-btn" onclick="goPrevNote()">‹ Prev</button>
-            <button class="floating-btn" id="next-btn" onclick="goNextNote()">Next ›</button>
-        </div>
     </div>
 
     <script>
         const API_BASE = "https://api.github.com/repos";
         const NOTES_FILE = "notes.json";
-        const LAST_VIEWED_KEY = "last_viewed_note_id";
 
         let notesData = [];
         let fileSha = null;
         let currentNoteMarkdown = "";   // Raw markdown for copying
-        let currentNoteId = null;        // Currently open note's ID (for prev/next)
         let searchDebounce = null;       // Debounce handle for search input
         let lastSyncedSize = 0;          // Bytes — used by status indicator
 
@@ -341,18 +313,13 @@
             window.scrollTo(0, 0);
         }
 
-        async function init() {
+        function init() {
             const token = localStorage.getItem('gh_token');
             const repo = localStorage.getItem('gh_repo');
             if (token && repo) {
                 document.getElementById('gh-token').value = token;
                 document.getElementById('gh-repo').value = repo;
-                await fetchNotes();
-                // Auto-restore the last viewed note (if it still exists)
-                const lastId = localStorage.getItem(LAST_VIEWED_KEY);
-                if (lastId && notesData.some(n => n.id === lastId)) {
-                    openNote(lastId);
-                }
+                fetchNotes();
             }
         }
 
@@ -519,15 +486,9 @@
             const note = notesData.find(n => n.id === id);
             if (!note) return;
             
-            currentNoteId = id;
-            // Persist for next session — re-opening the app will jump back here
-            localStorage.setItem(LAST_VIEWED_KEY, id);
-
             currentNoteMarkdown = note.content;
             document.getElementById('copy-btn').textContent = "Copy";
             document.getElementById('read-title').textContent = note.title;
-
-            updateNavButtons();
 
             // For huge notes, marked.parse can take a moment. Show a placeholder
             // and yield to the paint queue so the navigation feels instant.
@@ -541,28 +502,6 @@
                     mdEl.textContent = note.content || "";
                 }
             }, 10);
-        }
-
-        // Updates the disabled state of the bottom Prev / Next buttons
-        // based on the current note's position within notesData.
-        function updateNavButtons() {
-            const idx = notesData.findIndex(n => n.id === currentNoteId);
-            const prevBtn = document.getElementById('prev-btn');
-            const nextBtn = document.getElementById('next-btn');
-            prevBtn.disabled = (idx <= 0);
-            nextBtn.disabled = (idx === -1 || idx >= notesData.length - 1);
-        }
-
-        function goPrevNote() {
-            const idx = notesData.findIndex(n => n.id === currentNoteId);
-            if (idx > 0) openNote(notesData[idx - 1].id);
-        }
-
-        function goNextNote() {
-            const idx = notesData.findIndex(n => n.id === currentNoteId);
-            if (idx >= 0 && idx < notesData.length - 1) {
-                openNote(notesData[idx + 1].id);
-            }
         }
 
         async function copyCurrentNote() {
@@ -659,11 +598,6 @@
 
             try {
                 await syncToGitHub(updatedNotes, `Delete note: ${noteToDelete.title}`);
-                // If we just deleted the remembered note, drop the pointer
-                // so the next launch doesn't try to auto-open a missing note.
-                if (localStorage.getItem(LAST_VIEWED_KEY) === id) {
-                    localStorage.removeItem(LAST_VIEWED_KEY);
-                }
                 filterNotes(); 
             } catch (err) {
                 alert(err.message);
