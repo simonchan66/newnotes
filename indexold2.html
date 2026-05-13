@@ -36,12 +36,9 @@
         .screen { display: none; animation: fadeIn 0.3s ease; }
         .active { display: block; }
         
-        /* Animate opacity ONLY. Using transform here makes .screen a
-           containing block for position:fixed descendants, which causes the
-           bottom Prev/Next buttons to stick mid-page on iOS Safari. */
         @keyframes fadeIn {
-            from { opacity: 0; }
-            to   { opacity: 1; }
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
         /* Typography & Headers */
